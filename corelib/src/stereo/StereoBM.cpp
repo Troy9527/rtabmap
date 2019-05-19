@@ -30,6 +30,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <opencv2/calib3d/calib3d.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/imgproc/types_c.h>
+#include <iostream>
+#include <fstream>
+
+static int _count = 0;
 
 namespace rtabmap {
 
@@ -85,9 +89,11 @@ cv::Mat StereoBM::computeDisparity(
 	UASSERT((leftImage.type() == CV_8UC1 || leftImage.type() == CV_8UC3) && rightImage.type() == CV_8UC1);
 
 	cv::Mat leftMono;
+		/*std::cout << leftImage.cols << " " << leftImage.rows << " " << leftImage.channels() << std::endl;*/
 	if(leftImage.channels() == 3)
 	{
 		cv::cvtColor(leftImage, leftMono, CV_BGR2GRAY);
+		std::cout << "gray" << std::endl;
 	}
 	else
 	{
@@ -121,6 +127,34 @@ cv::Mat StereoBM::computeDisparity(
 	stereo->setDisp12MaxDiff(disp12MaxDiff_);
 	stereo->compute(leftMono, rightImage, disparity);
 #endif
+	std::cout << "BM" << std::endl; 
+	
+	if(_count == 0){
+		
+		/*std::cout << "start write file......" << std::endl;*/
+
+		/*std::ofstream ofs;*/
+		/*ofs.open ("disparity.txt", std::ofstream::out);*/
+
+		/*ofs << disparity << std::endl;*/
+		/*ofs.close();*/
+		
+		/*cv::Mat left_bgr;*/
+		/*std::cout << leftImage.cols << " " << leftImage.rows << " " << leftImage.channels() << std::endl;*/
+		/*cv::cvtColor(leftImage, left_bgr, CV_GRAY2BGR);*/
+		/*std::ofstream ofs;*/
+		/*ofs.open ("img_left.txt", std::ofstream::out);*/
+		/*ofs << left_bgr << std::endl;*/
+		/*ofs.close();*/
+		
+		/*std::ofstream ofs2;*/
+		/*ofs2.open ("img_right.txt", std::ofstream::out);*/
+		/*ofs2 << rightImage << std::endl;*/
+		/*ofs2.close();*/
+		
+		_count = 1;
+	}
+
 	return disparity;
 }
 

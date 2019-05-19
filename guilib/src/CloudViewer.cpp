@@ -48,6 +48,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QMainWindow>
 #include <set>
 
+#include <vtkTexture.h>
 #include <vtkCamera.h>
 #include <vtkRenderWindow.h>
 #include <vtkCubeSource.h>
