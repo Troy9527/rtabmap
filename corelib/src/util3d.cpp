@@ -2647,7 +2647,7 @@ cv::Point3f projectDisparityTo3D(
 		float disparity,
 		const StereoCameraModel & model)
 {
-	if(disparity > 0.0f && model.baseline() > 0.0f && model.left().fx() > 0.0f)
+	if(disparity > 16.0f && model.baseline() > 0.0f && model.left().fx() > 0.0f)
 	{
 		//Z = baseline * f / (d + cx1-cx0);
 		float c = 0.0f;

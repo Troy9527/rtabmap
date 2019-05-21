@@ -33,6 +33,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <fstream>
 
+/* Socket */
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <vector>
+#include <string>
+#include <cstdio>
+#include <opencv2/opencv.hpp>
+
+#define SOCK_PATH "/tmp/psmnet.sock"
+
 static int _count = 0;
 
 namespace rtabmap {
@@ -101,7 +116,7 @@ cv::Mat StereoBM::computeDisparity(
 	}
 
 	cv::Mat disparity;
-#if CV_MAJOR_VERSION < 3
+/*#if CV_MAJOR_VERSION < 3
 	cv::StereoBM stereo(cv::StereoBM::BASIC_PRESET);
 	stereo.state->SADWindowSize = blockSize_;
 	stereo.state->minDisparity = minDisparity_;
@@ -126,36 +141,70 @@ cv::Mat StereoBM::computeDisparity(
 	stereo->setSpeckleRange(speckleRange_);
 	stereo->setDisp12MaxDiff(disp12MaxDiff_);
 	stereo->compute(leftMono, rightImage, disparity);
-#endif
-	std::cout << "BM" << std::endl; 
+#endif*/
+	/*std::cout << "BM " << _count << std::endl; */
+
+	int sockfd, disp_bytes, total_bytes = 0, recv_bytes;
+	struct sockaddr_un dest;
+	char buffer[16], buffer2[10*1024];
+
+	sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	bzero(&dest, sizeof(dest));
+	dest.sun_family = AF_UNIX;
+	strcpy(dest.sun_path, SOCK_PATH);
 	
-	if(_count == 0){
-		
-		/*std::cout << "start write file......" << std::endl;*/
+	connect(sockfd, (struct sockaddr*)&dest, sizeof(dest));
 
-		/*std::ofstream ofs;*/
-		/*ofs.open ("disparity.txt", std::ofstream::out);*/
+	/* send left image */
+	std::vector<unsigned char> left_encode;
+	cv::imencode(".png", leftImage, left_encode);
 
-		/*ofs << disparity << std::endl;*/
-		/*ofs.close();*/
-		
-		/*cv::Mat left_bgr;*/
-		/*std::cout << leftImage.cols << " " << leftImage.rows << " " << leftImage.channels() << std::endl;*/
-		/*cv::cvtColor(leftImage, left_bgr, CV_GRAY2BGR);*/
-		/*std::ofstream ofs;*/
-		/*ofs.open ("img_left.txt", std::ofstream::out);*/
-		/*ofs << left_bgr << std::endl;*/
-		/*ofs.close();*/
-		
-		/*std::ofstream ofs2;*/
-		/*ofs2.open ("img_right.txt", std::ofstream::out);*/
-		/*ofs2 << rightImage << std::endl;*/
-		/*ofs2.close();*/
-		
-		_count = 1;
+	memset(buffer, 0, sizeof(buffer));
+	std::sprintf(buffer, "%d", (int)left_encode.size());
+	send(sockfd, buffer, sizeof(buffer), 0);
+	recv(sockfd, buffer, sizeof(buffer), 0);
+	send(sockfd, &left_encode[0], left_encode.size(), 0);
+
+	recv(sockfd, buffer, sizeof(buffer), 0);
+	
+	/* send right image */
+	std::vector<unsigned char> right_encode;
+	cv::imencode(".png", rightImage, right_encode);
+	
+	memset(buffer, 0, sizeof(buffer));
+	std::sprintf(buffer, "%d", (int)right_encode.size());
+	send(sockfd, buffer, sizeof(buffer), 0);
+	recv(sockfd, buffer, sizeof(buffer), 0);
+	send(sockfd, &right_encode[0], right_encode.size(), 0);
+
+	/* receive disparity map */
+	memset(buffer, 0, sizeof(buffer));
+	recv(sockfd, buffer, sizeof(buffer), 0);
+	
+	sscanf(buffer, "%d", &disp_bytes);
+
+	send(sockfd, buffer, sizeof(buffer), 0);
+	
+	std::vector<unsigned char> disp;
+	while(total_bytes < disp_bytes){
+		memset(buffer2, 0, sizeof(buffer2));
+		recv_bytes = recv(sockfd, buffer2, sizeof(buffer2), 0);
+		total_bytes += recv_bytes;
+		disp.insert(disp.end(), buffer2, buffer2 + recv_bytes);
 	}
+	
+	cv::Mat tmp = cv::imdecode(disp, CV_LOAD_IMAGE_GRAYSCALE);
+	tmp.convertTo(tmp, CV_32FC1);
+	/*std::string path = "/home/troy/project/test/disp", end = ".png", num = std::to_string(_count);*/
+	/*cv::imwrite(path+num+end, tmp);*/
+	/*cv::imwrite(path+"2_"+num+end, disparity);*/
 
-	return disparity;
+	close(sockfd);
+	if(_count == 0)
+		std::cout << tmp << std::endl;
+	_count++;
+	/*return disparity;*/
+	return tmp;
 }
 
 } /* namespace rtabmap */
