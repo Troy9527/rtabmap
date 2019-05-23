@@ -48,8 +48,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define SOCK_PATH "/tmp/psmnet.sock"
 
-static int _count = 0;
-
 namespace rtabmap {
 
 StereoBM::StereoBM(int blockSize, int numDisparities) :
@@ -200,9 +198,6 @@ cv::Mat StereoBM::computeDisparity(
 	/*cv::imwrite(path+"2_"+num+end, disparity);*/
 
 	close(sockfd);
-	if(_count == 0)
-		std::cout << tmp << std::endl;
-	_count++;
 	/*return disparity;*/
 	return tmp;
 }
