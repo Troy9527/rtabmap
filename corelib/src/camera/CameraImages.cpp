@@ -36,6 +36,21 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <opencv2/imgproc/types_c.h>
 #include <fstream>
 
+/* Socket */
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <vector>
+#include <string>
+#include <cstdio>
+#include <opencv2/opencv.hpp>
+
+#define SOCK_PATH "/tmp/psmnet.sock"
+
 namespace rtabmap
 {
 
@@ -751,6 +766,356 @@ SensorData CameraImages::captureImage(CameraInfo * info)
 		info->odomCovariance = cv::Mat::eye(6,6,CV_64FC1); // Note that with TORO and g2o file formats, we could get the covariance
 	}
 
+	return data;
+}
+
+SensorData CameraImages::captureImageSocket(CameraInfo * info, int sockfd)
+{
+	if(_syncImageRateWithStamps && _captureDelay>0.0)
+	{
+		int sleepTime = (1000*_captureDelay - 1000.0f*_captureTimer.getElapsedTime());
+		if(sleepTime > 2)
+		{
+			uSleep(sleepTime-2);
+		}
+		else if(sleepTime < 0)
+		{
+			if(this->getImageRate() > 0.0f)
+			{
+				UWARN("CameraImages: Cannot read images as fast as their timestamps (target delay=%fs, capture time=%fs). Disable "
+					  "source image rate or disable synchronization of capture time with timestamps.", 
+					  _captureDelay, _captureTimer.getElapsedTime());
+			}
+			else
+			{
+				UWARN("CameraImages: Cannot read images as fast as their timestamps (target delay=%fs, capture time=%fs).", 
+					_captureDelay, _captureTimer.getElapsedTime());
+			}
+		}
+
+		// Add precision at the cost of a small overhead
+		while(_captureTimer.getElapsedTime() < _captureDelay-0.000001)
+		{
+			//
+		}
+		_captureTimer.start();
+	}
+	_captureDelay = 0.0;
+
+	cv::Mat img;
+	LaserScan scan(cv::Mat(), _scanMaxPts, 0, LaserScan::kUnknown, _scanLocalTransform);
+	double stamp = UTimer::now();
+	Transform odometryPose;
+	Transform groundTruthPose;
+	cv::Mat depthFromScan;
+	UDEBUG("");
+	if(_dir->isValid())
+	{
+		if(_refreshDir)
+		{
+			_dir->update();
+			if(_scanDir)
+			{
+				_scanDir->update();
+			}
+		}
+		std::string imageFilePath;
+		std::string scanFilePath;
+		if(_startAt < 0)
+		{
+			const std::list<std::string> & fileNames = _dir->getFileNames();
+			if(fileNames.size())
+			{
+				if(_lastFileName.empty() || uStrNumCmp(_lastFileName,*fileNames.rbegin()) < 0)
+				{
+					_lastFileName = *fileNames.rbegin();
+					imageFilePath = _path + _lastFileName;
+				}
+			}
+			if(_scanDir)
+			{
+				const std::list<std::string> & scanFileNames = _scanDir->getFileNames();
+				if(scanFileNames.size())
+				{
+					if(_lastScanFileName.empty() || uStrNumCmp(_lastScanFileName,*scanFileNames.rbegin()) < 0)
+					{
+						_lastScanFileName = *scanFileNames.rbegin();
+						scanFilePath = _scanPath + _lastScanFileName;
+					}
+				}
+			}
+
+			if(_stamps.size())
+			{
+				stamp = _stamps.front();
+				_stamps.pop_front();
+				if(_stamps.size())
+				{
+					_captureDelay = _stamps.front() - stamp;
+				}
+				if(odometry_.size())
+				{
+					odometryPose = odometry_.front();
+					odometry_.pop_front();
+				}
+				if(groundTruth_.size())
+				{
+					groundTruthPose = groundTruth_.front();
+					groundTruth_.pop_front();
+				}
+			}
+		}
+		else
+		{
+			std::string fileName;
+			fileName = _dir->getNextFileName();
+			if(!fileName.empty())
+			{
+				imageFilePath = _path + fileName;
+				if(_stamps.size())
+				{
+					stamp = _stamps.front();
+					_stamps.pop_front();
+					if(_stamps.size())
+					{
+						_captureDelay = _stamps.front() - stamp;
+					}
+					if(odometry_.size())
+					{
+						odometryPose = odometry_.front();
+						odometry_.pop_front();
+					}
+					if(groundTruth_.size())
+					{
+						groundTruthPose = groundTruth_.front();
+						groundTruth_.pop_front();
+					}
+				}
+
+				while(_count++ < _startAt && (fileName = _dir->getNextFileName()).size())
+				{
+					imageFilePath = _path + fileName;
+					if(_stamps.size())
+					{
+						stamp = _stamps.front();
+						_stamps.pop_front();
+						if(_stamps.size())
+						{
+							_captureDelay = _stamps.front() - stamp;
+						}
+						if(odometry_.size())
+						{
+							odometryPose = odometry_.front();
+							odometry_.pop_front();
+						}
+						if(groundTruth_.size())
+						{
+							groundTruthPose = groundTruth_.front();
+							groundTruth_.pop_front();
+						}
+					}
+				}
+			}
+			if(_scanDir)
+			{
+				fileName = _scanDir->getNextFileName();
+				if(!fileName.empty())
+				{
+					scanFilePath = _scanPath + fileName;
+					while(_countScan++ < _startAt && (fileName = _scanDir->getNextFileName()).size())
+					{
+						scanFilePath = _scanPath + fileName;
+					}
+				}
+			}
+		}
+
+		if(_maxFrames <=0 || ++_framesPublished <= _maxFrames)
+		{
+
+			if(!imageFilePath.empty())
+			{
+				ULOGGER_DEBUG("Loading image : %s", imageFilePath.c_str());
+
+#if CV_MAJOR_VERSION >2 || (CV_MAJOR_VERSION >=2 && CV_MINOR_VERSION >=4)
+				/*img = cv::imread(imageFilePath.c_str(), cv::IMREAD_UNCHANGED);*/
+				char buffer[16], buffer2[10*1024];
+				int bytes, total_bytes = 0, recv_bytes;
+
+				memset(buffer, 0, sizeof(buffer));
+				recv(sockfd, buffer, sizeof(buffer), 0);
+				sscanf(buffer, "%d", &bytes);
+				send(sockfd, buffer, sizeof(buffer), 0);
+				
+				std::vector<unsigned char> buff;
+				while(total_bytes < bytes){
+					memset(buffer2, 0, sizeof(buffer2));
+					recv_bytes = recv(sockfd, buffer2, sizeof(buffer2), 0);
+					total_bytes += recv_bytes;
+					buff.insert(buff.end(), buffer2, buffer2 + recv_bytes);
+				}
+				img = cv::imdecode(buff, CV_LOAD_IMAGE_COLOR);
+#else
+				img = cv::imread(imageFilePath.c_str(), -1);
+#endif
+				UDEBUG("width=%d, height=%d, channels=%d, elementSize=%d, total=%d",
+						img.cols, img.rows, img.channels(), img.elemSize(), img.total());
+
+				if(_isDepth)
+				{
+					if(img.type() != CV_16UC1 && img.type() != CV_32FC1)
+					{
+						UERROR("Depth is on and the loaded image has not a format supported (file = \"%s\", type=%d). "
+								"Formats supported are 16 bits 1 channel (mm) and 32 bits 1 channel (m).",
+								imageFilePath.c_str(), img.type());
+						img = cv::Mat();
+					}
+
+					if(_depthScaleFactor > 1.0f)
+					{
+						img /= _depthScaleFactor;
+					}
+				}
+				else
+				{
+#if CV_MAJOR_VERSION < 3
+					// FIXME : it seems that some png are incorrectly loaded with opencv c++ interface, where c interface works...
+					if(img.depth() != CV_8U)
+					{
+						// The depth should be 8U
+						UWARN("Cannot read the image correctly, falling back to old OpenCV C interface...");
+						IplImage * i = cvLoadImage(imageFilePath.c_str());
+						img = cv::Mat(i, true);
+						cvReleaseImage(&i);
+					}
+#endif
+					if(img.channels()>3)
+					{
+						UWARN("Conversion from 4 channels to 3 channels (file=%s)", imageFilePath.c_str());
+						cv::Mat out;
+						cv::cvtColor(img, out, CV_BGRA2BGR);
+						img = out;
+					}
+					else if(_bayerMode >= 0 && _bayerMode <=3)
+					{
+						cv::Mat debayeredImg;
+						try
+						{
+							cv::cvtColor(img, debayeredImg, CV_BayerBG2BGR + _bayerMode);
+							img = debayeredImg;
+						}
+						catch(const cv::Exception & e)
+						{
+							UWARN("Error debayering images: \"%s\". Please set bayer mode to -1 if images are not bayered!", e.what());
+						}
+					}
+
+				}
+
+				if(!img.empty() && _model.isValidForRectification() && _rectifyImages)
+				{
+					img = _model.rectifyImage(img);
+				}
+			}
+
+			if(!scanFilePath.empty())
+			{
+				// load without filtering
+				scan = util3d::loadScan(scanFilePath);
+				scan = LaserScan(scan.data(), _scanMaxPts, 0.0f, scan.format(), _scanLocalTransform);
+				UDEBUG("Loaded scan=%d points", (int)scan.size());
+				if(_depthFromScan && !img.empty())
+				{
+					UDEBUG("Computing depth from scan...");
+					if(!_model.isValidForProjection())
+					{
+						UWARN("Depth from laser scan: Camera model should be valid.");
+					}
+					else if(_isDepth)
+					{
+						UWARN("Depth from laser scan: Loading already a depth image.");
+					}
+					else
+					{
+						pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = util3d::laserScanToPointCloud(scan, scan.localTransform());
+						depthFromScan = util3d::projectCloudToCamera(img.size(), _model.K(), cloud, _model.localTransform());
+						if(_depthFromScanFillHoles!=0)
+						{
+							util3d::fillProjectedCloudHoles(depthFromScan, _depthFromScanFillHoles>0, _depthFromScanFillHolesFromBorder);
+						}
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		UWARN("Directory is not set, camera must be initialized.");
+	}
+
+	if(_model.imageHeight() == 0 || _model.imageWidth() == 0)
+	{
+		_model.setImageSize(img.size());
+	}
+
+	SensorData data(scan, _isDepth?cv::Mat():img, _isDepth?img:depthFromScan, _model, this->getNextSeqID(), stamp);
+	data.setGroundTruth(groundTruthPose);
+
+	if(info && !odometryPose.isNull())
+	{
+		info->odomPose = odometryPose;
+		info->odomCovariance = cv::Mat::eye(6,6,CV_64FC1); // Note that with TORO and g2o file formats, we could get the covariance
+	}
+
+	return data;
+}
+
+SensorData CameraImages::takeImageSocket(CameraInfo * info, int sockfd){
+	bool warnFrameRateTooHigh = false;
+	float actualFrameRate = 0;
+	float imageRate = _imageRate;
+	if(imageRate>0)
+	{
+		int sleepTime = (1000.0f/imageRate - 1000.0f*_frameRateTimer->getElapsedTime());
+		if(sleepTime > 2)
+		{
+			uSleep(sleepTime-2);
+		}
+		else if(sleepTime < 0)
+		{
+			warnFrameRateTooHigh = true;
+			actualFrameRate = 1.0/(_frameRateTimer->getElapsedTime());
+		}
+
+		// Add precision at the cost of a small overhead
+		while(_frameRateTimer->getElapsedTime() < 1.0/double(imageRate)-0.000001)
+		{
+			//
+		}
+
+		double slept = _frameRateTimer->getElapsedTime();
+		_frameRateTimer->start();
+		UDEBUG("slept=%fs vs target=%fs", slept, 1.0/double(imageRate));
+	}
+
+	UTimer timer;
+	SensorData data  = this->captureImageSocket(info, sockfd);
+	double captureTime = timer.ticks();
+	if(warnFrameRateTooHigh)
+	{
+		UWARN("Camera: Cannot reach target image rate %f Hz, current rate is %f Hz and capture time = %f s.",
+				imageRate, actualFrameRate, captureTime);
+	}
+	else
+	{
+		UDEBUG("Time capturing image = %fs", captureTime);
+	}
+	if(info)
+	{
+		info->id = data.id();
+		info->stamp = data.stamp();
+		info->timeCapture = captureTime;
+	}
 	return data;
 }
 

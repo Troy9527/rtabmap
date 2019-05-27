@@ -29,6 +29,23 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/utilite/UStl.h>
 #include <opencv2/imgproc/types_c.h>
 
+/* Socket */
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <vector>
+#include <string>
+#include <cstdio>
+#include <opencv2/opencv.hpp>
+#include <thread>
+#include <chrono>
+
+#define SOCK_PATH "/tmp/rtabmap.sock"
+
 namespace rtabmap
 {
 
@@ -160,17 +177,37 @@ SensorData CameraStereoImages::captureImage(CameraInfo * info)
 	SensorData data;
 
 	SensorData left, right;
-	left = CameraImages::captureImage(info);
+
+	/* socket */
+	int sockfd, err;
+	struct sockaddr_un dest;
+
+	sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+	bzero(&dest, sizeof(dest));
+	dest.sun_family = AF_UNIX;
+	strcpy(dest.sun_path, SOCK_PATH);
+	
+	err = connect(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+	while(err == -1){
+		err = connect(sockfd, (struct sockaddr*)&dest, sizeof(dest));
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+
+	left = CameraImages::captureImageSocket(info, sockfd);
+	send(sockfd, "OK", 2, 0);
+	/*left = CameraImages::captureImage(info);*/
 	if(!left.imageRaw().empty())
 	{
 		if(camera2_)
 		{
-			right = camera2_->takeImage(info);
+			right = camera2_->takeImageSocket(info, sockfd);
 		}
 		else
 		{
 			right = this->takeImage(info);
 		}
+		
+		close(sockfd);
 
 		if(!right.imageRaw().empty())
 		{
@@ -198,6 +235,11 @@ SensorData CameraStereoImages::captureImage(CameraInfo * info)
 			data.setGroundTruth(left.groundTruth());
 		}
 	}
+	return data;
+}
+
+SensorData CameraStereoImages::captureImageSocket(CameraInfo * info, int sockfd){
+	SensorData data;
 	return data;
 }
 
