@@ -113,9 +113,11 @@ public:
 		_isDepth = isDepth;
 		_depthScaleFactor=depthScaleFactor;
 	}
+	SensorData takeImageSocket(CameraInfo * info, int sockfd);
 
 protected:
 	virtual SensorData captureImage(CameraInfo * info = 0);
+	virtual SensorData captureImageSocket(CameraInfo * info = 0, int sockfd = 0);
 	bool readPoses(
 			std::list<Transform> & outputPoses,
 			std::list<double> & stamps,

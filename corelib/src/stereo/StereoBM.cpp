@@ -114,7 +114,7 @@ cv::Mat StereoBM::computeDisparity(
 	}
 
 	cv::Mat disparity;
-#if CV_MAJOR_VERSION < 3
+/*#if CV_MAJOR_VERSION < 3
 	cv::StereoBM stereo(cv::StereoBM::BASIC_PRESET);
 	stereo.state->SADWindowSize = blockSize_;
 	stereo.state->minDisparity = minDisparity_;
@@ -139,10 +139,10 @@ cv::Mat StereoBM::computeDisparity(
 	stereo->setSpeckleRange(speckleRange_);
 	stereo->setDisp12MaxDiff(disp12MaxDiff_);
 	stereo->compute(leftMono, rightImage, disparity);
-#endif
+#endif*/
 	/*std::cout << "BM " << _count << std::endl; */
 
-/*	int sockfd, disp_bytes, total_bytes = 0, recv_bytes;
+	int sockfd, disp_bytes, total_bytes = 0, recv_bytes;
 	struct sockaddr_un dest;
 	char buffer[16], buffer2[10*1024];
 
@@ -153,7 +153,7 @@ cv::Mat StereoBM::computeDisparity(
 	
 	connect(sockfd, (struct sockaddr*)&dest, sizeof(dest));
 
-	 send left image 
+	 /*send left image */
 	std::vector<unsigned char> left_encode;
 	cv::imencode(".png", leftImage, left_encode);
 
@@ -165,7 +165,7 @@ cv::Mat StereoBM::computeDisparity(
 
 	recv(sockfd, buffer, sizeof(buffer), 0);
 	
-	 send right image 
+	 /*send right image */
 	std::vector<unsigned char> right_encode;
 	cv::imencode(".png", rightImage, right_encode);
 	
@@ -175,7 +175,7 @@ cv::Mat StereoBM::computeDisparity(
 	recv(sockfd, buffer, sizeof(buffer), 0);
 	send(sockfd, &right_encode[0], right_encode.size(), 0);
 
-	 receive disparity map 
+	 /*receive disparity map */
 	memset(buffer, 0, sizeof(buffer));
 	recv(sockfd, buffer, sizeof(buffer), 0);
 	
@@ -193,13 +193,13 @@ cv::Mat StereoBM::computeDisparity(
 	
 	cv::Mat tmp = cv::imdecode(disp, CV_LOAD_IMAGE_GRAYSCALE);
 	tmp.convertTo(tmp, CV_32FC1);
-	close(sockfd);*/
+	close(sockfd);
 	/*std::string path = "/home/troy/project/test/disp", end = ".png", num = std::to_string(_count);*/
 	/*cv::imwrite(path+num+end, tmp);*/
 	/*cv::imwrite(path+"2_"+num+end, disparity);*/
 
-	return disparity;
-	/*return tmp;*/
+	/*return disparity;*/
+	return tmp;
 }
 
 } /* namespace rtabmap */

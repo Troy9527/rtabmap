@@ -66,6 +66,7 @@ public:
 
 protected:
 	virtual SensorData captureImage(CameraInfo * info = 0);
+	virtual SensorData captureImageSocket(CameraInfo * info = 0, int sockfd = 0);
 
 private:
 	CameraImages * camera2_;

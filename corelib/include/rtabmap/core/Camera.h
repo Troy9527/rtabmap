@@ -79,10 +79,10 @@ protected:
 	 * returned rgb and depth images should be already rectified if calibration was loaded
 	 */
 	virtual SensorData captureImage(CameraInfo * info = 0) = 0;
-
+	
 	int getNextSeqID() {return ++_seq;}
 
-private:
+/*private:*/
 	float _imageRate;
 	Transform _localTransform;
 	cv::Size _targetImageSize;
